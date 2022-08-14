@@ -1,189 +1,303 @@
 <template>
-  <el-form ref="formSearch" class="el-form-search" v-bind="local.form" :model="local.values" :rules="rules">
-    <el-row class="items" :gutter="16">
-      <el-col v-for="item in items" :key="item.name" :span="item.span || 8">
-        <el-form-item v-bind="item.itemProps" :label="item.label" :rules="undefined" :prop="item.name"
-          :labelWidth="item.labelWidth">
-          <el-input v-if="item.type === 'input'" v-model="local.values[item.name]" v-bind="item.props"
-            :disabled="disabled || item.disabled" :placeholder="(item.props && item.props.placeholder) || '请输入'"
-            :maxlength="(item.props && item.props.maxlength) || 50">
-          </el-input>
-          <el-select v-else-if="item.type === 'select'" v-bind="item.props" v-model="local.values[item.name]"
-            :disabled="disabled || item.disabled">
-            <el-option :label="item.labelOption || '全部'" key="_all" value=""></el-option>
-            <el-option v-for="paramItem in item.paramItems" :key="paramItem.id" v-bind="paramItem.props"
-              :label="`${paramItem.label} ${paramItem?.enLabel}`" :value="paramItem.value">
-            </el-option>
-          </el-select>
-          <el-date-picker v-else-if="item.type === 'date'" v-model="local.values[item.name]"
-            @change="handleButtonChange(item.props)" :disabled="disabled || item.disabled" :type="item.paramItems.type"
-            :value-format="item.paramItems.format || 'yyyy-MM-dd HH:mm:ss'"
-            :range-separator="item.paramItems.separator || '至'" :start-placeholder="item.paramItems.start || '开始日期'"
-            :end-placeholder="item.paramItems.end || '结束日期'">
-            >
-          </el-date-picker>
-          <el-popover v-else-if="item.type === 'input-popover'" placement="right" width="400" trigger="click">
-            <el-tree :data="treeData" accordion :props="defaultProps" :render-content="renderContent"
-              :style="{ height: '500px', overflow: 'auto', display: 'flex' }" :highlight-current="true"
-              @node-click="data => handleNodeClick(data, item)"></el-tree>
-
-            <el-input slot="reference" v-model="local.values[item.name]" v-bind="item.props"
-              @focus="handleButtonFocus(item.props)" :disabled="disabled || item.disabled"
-              :placeholder="(item.props && item.props.placeholder) || '请输入'"
-              :maxlength="(item.props && item.props.maxlength) || 50">
-            </el-input>
-          </el-popover>
-        </el-form-item>
-      </el-col>
-    </el-row>
-
-    <div class="btns" v-show="btnstate">
-      <el-button type="primary" v-preventReclick @click="search">查询</el-button>
-      <el-button v-preventReclick @click="reset">重置</el-button>
+  <el-upload ref="upload" class="UploadFile" :class="{ hide: hideUpload }" :key="'upload_' + new Date().getTime()"
+    :action="action" :accept="accept" :name="name" :data="localData" :multiple="multiple" :limit="limit"
+    :file-list="fileList" :disabled="disabled" :auto-upload="autoUpload" :headers="headers" :list-type="listType"
+    :before-upload="beforeUpload" :on-change="handleChange" :on-success="handleSuccess" :on-error="handleError"
+    :on-exceed="handleExceed" :on-remove="handleRemove" :on-preview="handlePictureCardPreview"
+    :http-request="httpRequest" :before-remove="beforeRemove">
+    <el-button :loading="uploadLoading" v-if="listType === 'text'" type="primary" :size="buttonSize"
+      :disabled="disabled" v-preventReclick="reclick" :icon="btnIcon">{{ btnText }}</el-button>
+    <div v-else class="btn">
+      <i :class="btnIcon"></i>
+      <p>{{ btnText }}</p>
     </div>
-  </el-form>
+
+    <slot name="download"></slot>
+  </el-upload>
 </template>
 
 <script>
+// import { getFileInfo } from '@/api/common'
+
 export default {
-  name: 'FormSearch',
+  name: 'UploadFile',
   props: {
+    // 绑定的值
+    value: [String, Number],
+    limit: {
+      type: Number,
+      default: 1
+    },
+    multiple: {
+      type: Boolean,
+      default: false
+    },
+    autoUpload: {
+      type: Boolean,
+      default: true
+    },
     disabled: {
       type: Boolean,
       default: false
     },
-    btnstate: {
-      type: Boolean,
-      default: true
+    accept: {
+      type: String,
+      default: '' // .jpg,.jpeg,.png,.xls,.xlsx,.doc,.docx,.wav,.mp3,.msg
     },
-    items: {
-      type: Array,
-      default: () => []
+    action: {
+      type: String,
+      default: ''
     },
-    values: {
+    name: {
+      type: String,
+      default: 'fileName'
+    },
+    data: {
       type: Object,
       default: () => ({})
     },
-    rules: {
-      type: Object,
-      default: () => ({})
+    buttonText: {
+      type: String
     },
-    form: {
-      type: Object
+    buttonIcon: {
+      // 仅支持el-icon
+      type: String
     },
-    treeData: {
-      type: Array,
-      default: () => ([])
+    buttonSize: {
+      type: String,
+      default: 'medium'
+    },
+    // 上传文件大小限制（单位：M）
+    limitSize: {
+      type: Number,
+      default: 0
+    },
+    // 上传按钮点击间隔
+    reclick: {
+      type: Number,
+      default: 2000
+    },
+    // v-model 绑定值
+    bindKey: {
+      type: String,
+      default: 'id'
+    },
+    // 文件列表的类型
+    listType: {
+      type: String,
+      default: 'text' // text、picture、picture-card
     }
   },
   data () {
     return {
-      local: {
-        values: {},
-        form: {
-          labelWidth: '80px'
-        }
-      },
-      defaultProps: {
-        children: 'Children',
-        label: 'DeptName'
-      }
+      fileList: [],
+      chooseNum: 0,
+      hideUpload: false, // 隐藏上传按钮
+      uploadLoading: false
     }
   },
-  methods: {
-    handleNodeClick (data, item) {
-      if (data.UserGUID) { this.local.values[item.name] = data.EmpName }
-    },
-    renderContent (h, { node, data, store }) {
-      return (
-        <div>
-          {data.UserGUID ? (
-            <span>
-              {data.EmpName}
-            </span>
-          ) : (
-            <span>{data.DeptName}</span>
-          )}
-        </div>
-      )
-    },
-    search () {
-      if (this.$listeners.search) {
-        this.$emit('search')
+  computed: {
+    localData () {
+      return {
+        ...this.data
       }
     },
-    reset () {
-      if (this.$listeners.reset) {
-        this.$emit('reset')
-      } else {
-        this.$refs.formSearch.resetFields()
-        this.$nextTick(() => {
-          this.search()
+    headers () {
+      return {
+        Authorization: this.$store.getters.token
+      }
+    },
+    btnText () {
+      return this.buttonText ?? (this.autoUpload ? '上传' : '选择')
+    },
+    btnIcon () {
+      return (
+        this.buttonIcon ??
+        (this.listType === 'text' ? 'el-icon-upload2' : 'el-icon-plus')
+      )
+    }
+  },
+  mounted () {
+    // this.initFileList()
+  },
+  methods: {
+    // 图片列表-缩略图回显
+    initFileList () {
+      if (/^(\d+(,)?)+$/.test(this.value)) {
+        const ids = this.value.split(',')
+        const fileList = []
+        ids.forEach(async (id) => {
+          const res = await getFileInfo(id)
+          if (res?.code === 0 && res?.data) {
+            fileList.push({
+              uid: res.data.id,
+              name: res.data.fileName,
+              url: this.getFileFullPath(res.data.path),
+              status: 'success'
+            })
+          }
+        })
+        this.$set(this, 'fileList', fileList)
+      } else if (/^group/.test(this.value)) {
+        this.fileList.push({
+          uid: new Date().getTime(),
+          name: this.value,
+          url: this.getFileFullPath(this.value),
+          status: 'success'
         })
       }
     },
-    handleButtonChange (btn) {
-      if (btn?.onChange && typeof btn.onChange === 'function') {
-        btn.onChange.call(undefined, btn)
+    blobToBase64 (blob) {
+      return new Promise((resolve, reject) => {
+        const fileReader = new FileReader()
+        fileReader.onload = (e) => {
+          resolve(e.target.result)
+        }
+        // readAsDataURL
+        fileReader.readAsDataURL(blob)
+        fileReader.onerror = () => {
+          reject(new Error('blobToBase64 error'))
+        }
+      })
+    },
+    // 更新FileList (解决上传多张图片时，缩略图无法显示问题)
+    updateFileList (file, fileList) {
+      if (this.listType !== 'text') {
+        this.blobToBase64(file.raw).then((res) => {
+          // 转化后的base64
+          fileList.some((item) => {
+            if (item.uid === file.uid) {
+              item.url = res
+              return true
+            }
+          })
+          this.$set(this, 'fileList', fileList)
+        })
+      } else {
+        this.$set(this, 'fileList', fileList)
       }
     },
-    handleButtonFocus (btn) {
-      if (btn?.onFocus && typeof btn.onFocus === 'function') {
-        btn.onFocus.call(undefined, btn)
+    /**
+     * 文件上传相关
+     */
+    handleExceed () {
+      this.$message.error(`最多上传${this.limit}个文件`)
+    },
+    beforeUpload (file) {
+      console.log('beforeUpload:::', file)
+      if (this.chooseNum > this.limit) {
+        this.$message.error(`一次最多上传${this.limit}个文件`)
+        return false
       }
+      if (file.name.length > 50) {
+        this.$message.error('上传文件名不能超过50个字符')
+        return false
+      }
+      if (this.limitSize) {
+        if (file.size / 1024 / 1024 > this.limitSize) {
+          this.$message.error(`上传文件不能大于${this.limitSize}M`)
+          return false
+        }
+      }
+      if (this.accept) {
+        const ext = file.name.split('.').pop()
+        if (!this.accept.includes(ext)) {
+          this.$message.error(`无效的文件类型！仅支持 ${this.accept} 的格式`)
+          return false
+        }
+      }
+      this.uploadLoading = true
+    },
+    // 选择文件
+    handleChange (file, fileList) {
+      console.log('handleChange:::', file, fileList)
+      const chooseNum =
+        this.$refs.upload.$refs['upload-inner'].$refs.input.files.length
+      if (chooseNum) {
+        this.chooseNum = chooseNum
+      }
+
+      if (!this.autoUpload) {
+        this.updateFileList(file, fileList)
+        this.$emit('change', file, fileList)
+      }
+    },
+    // 删除附件
+    handleRemove (file, fileList) {
+      this.fileList = fileList
+      this.$emit('remove', file, fileList)
+    },
+    //
+    handlePictureCardPreview (file) {
+      this.$emit('preview', file)
+    },
+    beforeRemove (file, fileList) {
+      if (file && file.status === 'success') {
+        this.$emit('beforeRemove', file, fileList)
+      }
+    },
+    httpRequest (params) {
+      this.$emit('httpRequest', params, this.bindKey)
+    },
+    // 上传成功
+    handleSuccess (res, file, fileList) {
+      console.log(res)
+      console.log(file, fileList)
+      if (res?.code === 0 || res?.code === '0') {
+        this.updateFileList(file, fileList)
+        if (this.$listeners.success) {
+          this.$emit('success', res, file, fileList)
+        } else {
+          this.$emit('input', res[this.bindKey])
+        }
+      } else {
+        this.$message.error(res.msg || '上传失败')
+        this.$nextTick(() => {
+          this.fileList = fileList.filter((item) => item.uid !== file.uid)
+          this.$listeners.error && this.$emit('error', res, file, fileList)
+        })
+      }
+      this.uploadLoading = false
+    },
+    // 上传失败
+    handleError (err, file, fileList) {
+      console.log(err)
+      this.$message.error(err)
+      this.$nextTick(() => {
+        this.fileList = fileList.filter((item) => item.uid !== file.uid)
+        this.$listeners.error && this.$emit('error', err, file, fileList)
+      })
+      this.uploadLoading = false
+    },
+    // 触发上传
+    submit () {
+      this.$refs.upload.submit()
     }
   },
   watch: {
-    values: {
-      handler (val) {
-        if (
-          Object.prototype.toString.call(val) === '[object Object]' &&
-          JSON.stringify(val) !== JSON.stringify(this.local.values)
-        ) {
-          this.$set(this.local, 'values', { ...val })
+    fileList: {
+      handler () {
+        if (this.listType !== 'text') {
+          // 隐藏上传按钮
+          this.$nextTick(() => {
+            this.hideUpload = this.fileList.length >= this.limit
+          })
         }
       },
-      immediate: true,
-      deep: true
-    },
-    form: {
-      handler (val) {
-        if (Object.prototype.toString.call(val) === '[object Object]') {
-          this.local.form = Object.assign(this.local.form, val)
-        }
-      },
-      immediate: true,
-      deep: true
-    },
-    'local.values': {
-      handler (val) {
-        this.$emit('update:values', { ...val })
-      },
-      deep: true
+      immediate: true
     }
   }
 }
 </script>
 
 <style lang="scss">
-.el-form-search {
-  display: flex;
+//@import "@styles/variables.scss";
 
-  .items {
-    flex: 1;
+.UploadFile {
+  &.hide {
+    .el-upload--picture-card {
+      display: none;
+    }
   }
-
-  .btns {
-    flex: 0 0 auto;
-    width: 170px;
-    text-align: right;
-  }
-
-  .down-tree {
-    max-height: 200px;
-    // display: block;
-    overflow-y: scroll;
-  }
-
 }
 </style>
